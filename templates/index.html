@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fabric Embedded Agent</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/powerbi-client@2.22.0/dist/powerbi.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-left">
+                <h1>Fabric Embedded Agent</h1>
+            </div>
+            <div class="header-right">
+                <span class="user-info">
+                    <span class="user-avatar">{{ user.name[0] if user.name else 'U' }}</span>
+                    <span class="user-name">{{ user.name or user.preferred_username or 'User' }}</span>
+                </span>
+                <a href="{{ url_for('identity.logout') }}" class="logout-button">Sign Out</a>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- PowerBI Report Section -->
+            <section class="report-section">
+                <div class="section-header">
+                    <h2>📊 PowerBI Report</h2>
+                    <button id="refreshReport" class="icon-button" title="Refresh Report">
+                        🔄
+                    </button>
+                </div>
+                <div id="reportContainer" class="report-container">
+                    <div class="loading-placeholder">
+                        <div class="spinner"></div>
+                        <p>Loading report...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Chat Section -->
+            <section class="chat-section">
+                <div class="section-header">
+                    <h2>🤖 Data Agent Chat</h2>
+                    <button id="clearChat" class="icon-button" title="Clear Chat">
+                        🗑️
+                    </button>
+                </div>
+                <div class="chat-container">
+                    <div id="chatMessages" class="chat-messages">
+                        <div class="welcome-message">
+                            <p>👋 Hi! I'm your Fabric Data Agent. Ask me anything about your data!</p>
+                            <p class="hint">Try questions like:</p>
+                            <ul>
+                                <li>"What were the total sales last month?"</li>
+                                <li>"Show me the top 5 customers by revenue"</li>
+                                <li>"What's the trend in product returns?"</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="chat-input-container">
+                        <input 
+                            type="text" 
+                            id="chatInput" 
+                            class="chat-input" 
+                            placeholder="Ask a question about your data..."
+                            autocomplete="off"
+                        >
+                        <button id="sendButton" class="send-button">
+                            <span class="send-icon">➤</span>
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        // PowerBI Embedding
+        const powerbi = window.powerbi;
+        let report = null;
+
+        async function loadReport() {
+            const reportContainer = document.getElementById('reportContainer');
+            
+            try {
+                // Get embed info from API
+                const response = await fetch('/api/getembedinfo');
+                
+                if (!response.ok) {
+                    throw new Error('Failed to get embed info');
+                }
+                
+                const embedInfo = await response.json();
+                
+                if (embedInfo.error) {
+                    throw new Error(embedInfo.error);
+                }
+                
+                // Configure the embed settings
+                const embedConfig = {
+                    type: 'report',
+                    tokenType: powerbi.models.TokenType.Embed,
+                    accessToken: embedInfo.accessToken,
+                    embedUrl: embedInfo.embedUrl,
+                    id: embedInfo.reportId,
+                    permissions: powerbi.models.Permissions.Read,
+                    settings: {
+                        panes: {
+                            filters: {
+                                visible: true,
+                                expanded: false
+                            },
+                            pageNavigation: {
+                                visible: true
+                            }
+                        },
+                        background: powerbi.models.BackgroundType.Transparent
+                    }
+                };
+                
+                // Clear container and embed the report
+                reportContainer.innerHTML = '';
+                report = powerbi.embed(reportContainer, embedConfig);
+                
+                // Handle report events
+                report.on('loaded', function() {
+                    console.log('Report loaded successfully');
+                });
+                
+                report.on('error', function(event) {
+                    console.error('Report error:', event.detail);
+                    showReportError('Error loading report. Please try refreshing.');
+                });
+                
+            } catch (error) {
+                console.error('Error loading report:', error);
+                showReportError(error.message || 'Failed to load report');
+            }
+        }
+
+        function showReportError(message) {
+            const reportContainer = document.getElementById('reportContainer');
+            reportContainer.innerHTML = `
+                <div class="error-placeholder">
+                    <p>⚠️ ${message}</p>
+                    <button onclick="loadReport()" class="retry-button">Retry</button>
+                </div>
+            `;
+        }
+
+        // Chat functionality
+        const chatMessages = document.getElementById('chatMessages');
+        const chatInput = document.getElementById('chatInput');
+        const sendButton = document.getElementById('sendButton');
+        const clearChatButton = document.getElementById('clearChat');
+
+        function addMessage(content, isUser = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'agent-message'}`;
+            
+            const avatar = document.createElement('span');
+            avatar.className = 'message-avatar';
+            avatar.textContent = isUser ? '👤' : '🤖';
+            
+            const text = document.createElement('div');
+            text.className = 'message-content';
+            text.innerHTML = formatMessage(content);
+            
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(text);
+            chatMessages.appendChild(messageDiv);
+            
+            // Scroll to bottom
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function formatMessage(content) {
+            // Basic markdown-like formatting
+            return content
+                .replace(/\n/g, '<br>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/`(.*?)`/g, '<code>$1</code>');
+        }
+
+        function showTypingIndicator() {
+            const indicator = document.createElement('div');
+            indicator.className = 'message agent-message typing-indicator';
+            indicator.id = 'typingIndicator';
+            indicator.innerHTML = `
+                <span class="message-avatar">🤖</span>
+                <div class="message-content">
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                </div>
+            `;
+            chatMessages.appendChild(indicator);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function removeTypingIndicator() {
+            const indicator = document.getElementById('typingIndicator');
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+
+        async function sendMessage() {
+            const question = chatInput.value.trim();
+            if (!question) return;
+            
+            // Clear input and disable send
+            chatInput.value = '';
+            sendButton.disabled = true;
+            chatInput.disabled = true;
+            
+            // Remove welcome message if present
+            const welcomeMsg = chatMessages.querySelector('.welcome-message');
+            if (welcomeMsg) {
+                welcomeMsg.remove();
+            }
+            
+            // Add user message
+            addMessage(question, true);
+            
+            // Show typing indicator
+            showTypingIndicator();
+            
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ question })
+                });
+                
+                const data = await response.json();
+                
+                removeTypingIndicator();
+                
+                if (data.error) {
+                    addMessage(`Error: ${data.error}`);
+                } else {
+                    addMessage(data.response);
+                }
+                
+            } catch (error) {
+                removeTypingIndicator();
+                addMessage(`Error: ${error.message || 'Failed to send message'}`);
+            } finally {
+                sendButton.disabled = false;
+                chatInput.disabled = false;
+                chatInput.focus();
+            }
+        }
+
+        async function clearChat() {
+            try {
+                await fetch('/api/chat/clear', { method: 'POST' });
+                
+                // Clear chat UI
+                chatMessages.innerHTML = `
+                    <div class="welcome-message">
+                        <p>👋 Hi! I'm your Fabric Data Agent. Ask me anything about your data!</p>
+                        <p class="hint">Try questions like:</p>
+                        <ul>
+                            <li>"What were the total sales last month?"</li>
+                            <li>"Show me the top 5 customers by revenue"</li>
+                            <li>"What's the trend in product returns?"</li>
+                        </ul>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error clearing chat:', error);
+            }
+        }
+
+        // Event listeners
+        sendButton.addEventListener('click', sendMessage);
+        
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        clearChatButton.addEventListener('click', clearChat);
+
+        document.getElementById('refreshReport').addEventListener('click', () => {
+            if (report) {
+                report.refresh();
+            } else {
+                loadReport();
+            }
+        });
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadReport();
+            chatInput.focus();
+        });
+    </script>
+</body>
+</html>

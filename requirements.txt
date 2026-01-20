@@ -1,0 +1,7 @@
+flask
+python-dotenv
+requests
+ms_identity_python[flask] @ git+https://github.com/azure-samples/ms-identity-python@0.9
+azure-identity
+openai
+msal

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Fabric Embedded Agent</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body class="login-page">
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <h1>Fabric Embedded Agent</h1>
+                <p>PowerBI Reports + AI-Powered Data Assistant</p>
+            </div>
+            
+            {% if error %}
+            <div class="error-message">
+                {{ error }}
+            </div>
+            {% endif %}
+            
+            <div class="login-content">
+                <p>Sign in with your Microsoft account to access:</p>
+                <ul class="feature-list">
+                    <li>📊 Interactive PowerBI Reports</li>
+                    <li>🤖 AI Data Agent Chat</li>
+                    <li>💡 Natural Language Data Queries</li>
+                </ul>
+            </div>
+            
+            <div class="login-actions">
+                <a href="{{ url_for('index') }}" class="login-button">
+                    <svg class="microsoft-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 23 23" width="20" height="20">
+                        <path fill="#f35325" d="M1 1h10v10H1z"/>
+                        <path fill="#81bc06" d="M12 1h10v10H12z"/>
+                        <path fill="#05a6f0" d="M1 12h10v10H1z"/>
+                        <path fill="#ffba08" d="M12 12h10v10H12z"/>
+                    </svg>
+                    Sign in with Microsoft
+                </a>
+            </div>
+            
+            <div class="login-footer">
+                <p>Protected by Microsoft Entra ID</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
