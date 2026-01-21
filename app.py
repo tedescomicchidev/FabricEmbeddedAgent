@@ -27,7 +27,10 @@ app = Flask(__name__)
 app.secret_key = config["FLASK_SECRET_KEY"]
 app.config["SESSION_TYPE"] = config["SESSION_TYPE"]
 
-# Initialize Entra ID Authentication
+# Fabric API scope for token acquisition
+FABRIC_SCOPE = ["https://api.fabric.microsoft.com/.default"]
+
+# Initialize Entra ID Authentication with Fabric scope
 auth = Auth(
     app,
     authority=config["AUTHORITY"],
@@ -55,6 +58,35 @@ def get_fabric_client():
         except Exception as e:
             logger.error(f"Failed to initialize Fabric client: {e}")
     return fabric_client
+
+
+def get_fabric_token():
+    """
+    Acquire Fabric API access token using Service Principal (client credentials).
+    
+    Returns:
+        str: Access token for Fabric API, or None if acquisition fails
+    """
+    try:
+        # Create MSAL confidential client application
+        msal_client = msal.ConfidentialClientApplication(
+            config["CLIENT_ID"],
+            authority=config["AUTHORITY"],
+            client_credential=config["CLIENT_SECRET"]
+        )
+        
+        # Acquire token for Fabric API using client credentials
+        token_response = msal_client.acquire_token_for_client(scopes=FABRIC_SCOPE)
+        
+        if "access_token" not in token_response:
+            logger.error(f"Failed to acquire Fabric token: {token_response.get('error_description', 'Unknown error')}")
+            return None
+        
+        return token_response["access_token"]
+        
+    except Exception as e:
+        logger.error(f"Error acquiring Fabric token: {e}")
+        return None
 
 
 def get_powerbi_embed_token():
@@ -188,8 +220,15 @@ def chat(*, context):
                 "error": "Fabric Data Agent is not configured. Please check DATA_AGENT_URL and TENANT_ID settings."
             }), 503
         
+        # Get Fabric API access token
+        access_token = get_fabric_token()
+        if not access_token:
+            return jsonify({
+                "error": "Failed to acquire Fabric API token. Please check your Azure AD app registration has the required Fabric API permissions."
+            }), 503
+        
         # Send question to Fabric Data Agent
-        response = client.ask(question, thread_name=thread_name)
+        response = client.ask(question, access_token=access_token, thread_name=thread_name)
         
         return jsonify({"response": response})
         

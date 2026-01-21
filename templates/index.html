@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fabric Embedded Agent</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <script src="https://cdn.jsdelivr.net/npm/powerbi-client@2.22.0/dist/powerbi.min.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -78,9 +77,9 @@
         </main>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/powerbi-client@2.22.0/dist/powerbi.min.js"></script>
     <script>
         // PowerBI Embedding
-        const powerbi = window.powerbi;
         let report = null;
 
         async function loadReport() {
@@ -103,22 +102,17 @@
                 // Configure the embed settings
                 const embedConfig = {
                     type: 'report',
-                    tokenType: powerbi.models.TokenType.Embed,
+                    tokenType: window["powerbi-client"].models.TokenType.Embed,
                     accessToken: embedInfo.accessToken,
                     embedUrl: embedInfo.embedUrl,
                     id: embedInfo.reportId,
-                    permissions: powerbi.models.Permissions.Read,
+                    permissions: window["powerbi-client"].models.Permissions.Read,
                     settings: {
                         panes: {
-                            filters: {
-                                visible: true,
-                                expanded: false
-                            },
-                            pageNavigation: {
-                                visible: true
-                            }
+                            filters: { visible: false },
+                            pageNavigation: { visible: true }
                         },
-                        background: powerbi.models.BackgroundType.Transparent
+                        background: window["powerbi-client"].models.BackgroundType.Transparent
                     }
                 };
                 
