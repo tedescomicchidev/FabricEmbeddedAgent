@@ -1,45 +1,17 @@
-#!/usr/bin/env python3
 """
-Fabric Data Agent External Client
-
-A standalone Python client for calling Microsoft Fabric Data Agents from outside
-of the Fabric environment using interactive browser authentication.
-
-Requirements:
-- azure-identity
-- openai
-- python-dotenv (optional, for environment variables)
-
-Usage:
-1. Set your TENANT_ID and DATA_AGENT_URL in the script or environment variables
-2. Run the script - it will open a browser for authentication
-3. The client will fetch a bearer token and make calls to your data agent
+Fabric Data Agent SDK Client.
+Handles communication with Microsoft Fabric Data Agent API using OpenAI Assistants API.
 """
 
+import logging
 import time
 import uuid
-import json
-import os, requests
-import warnings
-from typing import Optional
-from azure.identity import InteractiveBrowserCredential
+import requests
+from typing import Optional, Dict, Any, List
+
 from openai import OpenAI
 
-# Suppress OpenAI Assistants API deprecation warnings
-# (Fabric Data Agents don't support the newer Responses API yet)
-warnings.filterwarnings(
-    "ignore",
-    category=DeprecationWarning,
-    message=r".*Assistants API is deprecated.*"
-)
-
-# Optional: Load from .env file if available
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-
+logger = logging.getLogger(__name__)
 
 class FabricDataAgentClient:
     """
@@ -1087,73 +1059,3 @@ class FabricDataAgentClient:
         
         return sql_queries
 
-
-def main(questions: list, raw_response: bool = False, thread_name = None):
-    """
-    Example usage of the Fabric Data Agent Client.
-    """
-    # Configuration - Update these with your actual values
-    TENANT_ID = os.getenv("TENANT_ID", "your-tenant-id-here")
-    DATA_AGENT_URL = os.getenv("DATA_AGENT_URL", "your-data-agent-url-here")
-    
-    # Validate configuration
-    if TENANT_ID == "your-tenant-id-here" or DATA_AGENT_URL == "your-data-agent-url-here":
-        print("❌ Please update TENANT_ID and DATA_AGENT_URL with your actual values")
-        print("\nYou can either:")
-        print("1. Edit this script and update the values directly")
-        print("2. Set environment variables: TENANT_ID and DATA_AGENT_URL")
-        print("3. Create a .env file with these variables")
-        return
-    
-    try:
-        # Initialize the client (this will trigger authentication)
-        client = FabricDataAgentClient(
-            tenant_id=TENANT_ID,
-            data_agent_url=DATA_AGENT_URL
-        )
-        
-        print("\n" + "="*60)
-        print("🤖 Fabric Data Agent Client - Ready!")
-        print("="*60)
-        
-        for i, question in enumerate(questions, 1):
-            if raw_response == True: #printing (mostly) raw response
-                response = client.get_raw_run_response(question, thread_name=thread_name)
-                print(f"\nConversation in thread '{response['thread']['name']}, thread_id: {response['thread']['id']}':\n" + "-" * 50)
-                for message in response['messages']['data']:
-                    print(f"Role: {message['role']}, Content: \n{message['content'][0]['text']['value']}\n---")
-                print(f"\n💬 json Response:")
-                print("-" * 50)
-                print(json.dumps(response, indent=2, default=str))
-                print("-" * 50)
-            else:
-                response = client.ask(question, thread_name=thread_name)
-                print(f"\n💬 Response:")
-                print("-" * 50)
-                print(response)
-                print("-" * 50)
-            
-            # Wait between requests
-            if i < len(questions):
-                n = 1
-                print(f"\nWaiting {n} seconds before next question...")
-                time.sleep(n)
-        
-        print("\n✅ All examples completed successfully!")
-        
-    except KeyboardInterrupt:
-        print("\n⏹️ Operation cancelled by user")
-    except Exception as e:
-        print(f"\n❌ Error: {e}")
-
-
-if __name__ == "__main__":
-    # Example questions
-    
-    thread_name = "example_threadname"
-    questions = [
-        "What data is available in the lakehouse?",
-        "Show me the top 5 records from any available table",
-        "What are the column names and types in the main tables?"
-    ]
-    main(questions, raw_response=True, thread_name=thread_name)
