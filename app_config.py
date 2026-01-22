@@ -28,6 +28,14 @@ def get_config():
         # PowerBI Embedding
         "PBI_WORKSPACE_ID": os.getenv("PBI_WORKSPACE_ID", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
         "PBI_REPORT_ID": os.getenv("PBI_REPORT_ID", "11111111-2222-3333-4444-555555555555"),
+        "PBI_DATASET_ID": os.getenv("PBI_DATASET_ID"),  # Required for RLS
+        
+        # Row-Level Security (RLS) Configuration
+        # Set RLS_ENABLED to "true" to enable dynamic RLS
+        # RLS_ROLES: Comma-separated list of RLS role names defined in the Power BI dataset
+        # The user's UPN (email) from Entra ID authentication will be used as the username
+        "RLS_ENABLED": os.getenv("RLS_ENABLED", "false").lower() == "true",
+        "RLS_ROLES": [role.strip() for role in os.getenv("RLS_ROLES", "").split(",") if role.strip()],
         
         # Fabric Data Agent
         "DATA_AGENT_URL": os.getenv("DATA_AGENT_URL"),

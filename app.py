@@ -89,9 +89,18 @@ def get_fabric_token():
         return None
 
 
-def get_powerbi_embed_token():
+def get_powerbi_embed_token(user_context=None):
     """
     Acquire PowerBI embed token using Service Principal authentication.
+    Supports dynamic Row-Level Security (RLS) when enabled.
+    
+    SECURITY: The user identity for RLS is ALWAYS derived from the authenticated
+    user context (Entra ID session), never from frontend input. This prevents
+    users from spoofing their identity to access other users' data.
+    
+    Args:
+        user_context: The authenticated user context from Entra ID (contains 'preferred_username', 'oid', etc.)
+                     This is obtained from the backend session, NOT from client input.
     
     Returns:
         dict: Contains embedUrl, accessToken, and reportId
@@ -117,6 +126,7 @@ def get_powerbi_embed_token():
         # Get report details from PowerBI API
         workspace_id = config["PBI_WORKSPACE_ID"]
         report_id = config["PBI_REPORT_ID"]
+        dataset_id = config.get("PBI_DATASET_ID")
         
         headers = {
             "Authorization": f"Bearer {access_token}",
@@ -129,12 +139,53 @@ def get_powerbi_embed_token():
         report_response.raise_for_status()
         report_info = report_response.json()
         
-        # Generate embed token
-        embed_token_url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/reports/{report_id}/GenerateToken"
+        # If dataset_id is not configured, get it from the report
+        if not dataset_id:
+            dataset_id = report_info.get("datasetId")
+        
+        # Build embed token request body
         embed_token_body = {
             "accessLevel": "View",
             "allowSaveAs": False
         }
+        
+        # Add RLS identity if enabled - SECURITY: Identity comes from backend session only
+        if config.get("RLS_ENABLED") and user_context:
+            rls_roles = config.get("RLS_ROLES", [])
+            
+            if not rls_roles:
+                logger.warning("RLS is enabled but no roles are configured. Set RLS_ROLES in environment.")
+            
+            if not dataset_id:
+                logger.error("RLS requires a dataset ID. Set PBI_DATASET_ID in environment or ensure report has a linked dataset.")
+                return None
+            
+            # SECURITY: Extract user identity from the authenticated session
+            # This is the key security measure - the username is NEVER accepted from the frontend
+            # We use 'preferred_username' (UPN/email) which is the standard for RLS with userprincipalname()
+            # Fallback to 'email' or construct from name if UPN is not available
+            user_identity = (
+                user_context.get("preferred_username")  # Standard UPN claim
+                or user_context.get("email")             # Fallback to email claim
+                or user_context.get("upn")               # Alternative UPN claim
+            )
+            
+            if not user_identity:
+                logger.error("Cannot apply RLS: User identity (UPN/email) not found in authentication context")
+                return None
+            
+            logger.info(f"Applying RLS for user: {user_identity} with roles: {rls_roles}")
+            
+            # Build the effective identity for RLS
+            # This identity is passed to Power BI to filter data according to RLS rules
+            embed_token_body["identities"] = [{
+                "username": user_identity,  # Used by DAX username() or userprincipalname() functions
+                "roles": rls_roles,          # RLS roles defined in the Power BI dataset
+                "datasets": [dataset_id]     # Dataset(s) to apply RLS to
+            }]
+        
+        # Generate embed token
+        embed_token_url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/reports/{report_id}/GenerateToken"
         
         embed_response = requests.post(embed_token_url, headers=headers, json=embed_token_body)
         embed_response.raise_for_status()
@@ -179,9 +230,16 @@ def get_embed_info(*, context):
     """
     API endpoint to get PowerBI embed information.
     Returns embedUrl, accessToken, and reportId for the configured report.
+    
+    SECURITY: For RLS-enabled reports, the user identity is extracted from the
+    authenticated session context (Entra ID), NOT from any client-provided input.
+    This ensures users cannot spoof their identity to access other users' data.
     """
     try:
-        embed_info = get_powerbi_embed_token()
+        # Pass the authenticated user context to the embed token generator
+        # SECURITY: user context comes from Entra ID authentication, not from client
+        user_context = context.get('user') if context else None
+        embed_info = get_powerbi_embed_token(user_context=user_context)
         
         if embed_info:
             return jsonify(embed_info)
