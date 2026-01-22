@@ -5,6 +5,7 @@ Combines PowerBI embedded reports with Fabric Data Agent chat interface.
 
 import logging
 import requests
+import re
 from flask import Flask, render_template, request, jsonify, session
 from identity.flask import Auth
 import msal
@@ -41,6 +42,100 @@ auth = Auth(
 
 # Initialize Fabric Data Agent client (lazy initialization)
 fabric_client = None
+
+
+_GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _is_guid(value: str) -> bool:
+    if not value:
+        return False
+    return bool(_GUID_RE.match(value.strip()))
+
+
+def _parse_roles(roles_raw):
+    if roles_raw is None:
+        return []
+    if isinstance(roles_raw, list):
+        roles_list = roles_raw
+    else:
+        roles_list = str(roles_raw).split(",")
+    roles = [str(r).strip() for r in roles_list if str(r).strip()]
+    # De-duplicate while preserving order
+    seen = set()
+    deduped = []
+    for r in roles:
+        if r not in seen:
+            deduped.append(r)
+            seen.add(r)
+    return deduped
+
+
+def get_effective_embed_settings():
+    """Merge env config defaults with per-session overrides.
+
+    Note: we intentionally do NOT allow the frontend to set the RLS username.
+    Identity always comes from the authenticated Entra ID session.
+    """
+    defaults = {
+        "workspaceId": config.get("PBI_WORKSPACE_ID"),
+        "reportId": config.get("PBI_REPORT_ID"),
+        "datasetId": config.get("PBI_DATASET_ID"),
+        "rlsEnabled": bool(config.get("RLS_ENABLED")),
+        "rlsRoles": list(config.get("RLS_ROLES", [])),
+    }
+
+    overrides = session.get("embed_settings") or {}
+    merged = {**defaults, **overrides}
+
+    # Normalize
+    merged["workspaceId"] = (merged.get("workspaceId") or "").strip() or None
+    merged["reportId"] = (merged.get("reportId") or "").strip() or None
+    merged["datasetId"] = (merged.get("datasetId") or "").strip() or None
+    merged["rlsEnabled"] = bool(merged.get("rlsEnabled"))
+    merged["rlsRoles"] = _parse_roles(merged.get("rlsRoles"))
+    return merged
+
+
+def _validate_embed_settings(settings: dict):
+    errors = []
+
+    workspace_id = (settings.get("workspaceId") or "").strip()
+    report_id = (settings.get("reportId") or "").strip()
+    dataset_id = (settings.get("datasetId") or "").strip()
+    rls_enabled = bool(settings.get("rlsEnabled"))
+    rls_roles = _parse_roles(settings.get("rlsRoles"))
+
+    if not workspace_id:
+        errors.append("workspaceId is required")
+    elif not _is_guid(workspace_id):
+        errors.append("workspaceId must be a GUID")
+
+    if not report_id:
+        errors.append("reportId is required")
+    elif not _is_guid(report_id):
+        errors.append("reportId must be a GUID")
+
+    if dataset_id and not _is_guid(dataset_id):
+        errors.append("datasetId must be a GUID when provided")
+
+    # Guardrails: keep roles reasonable
+    if len(rls_roles) > 20:
+        errors.append("rlsRoles has too many entries (max 20)")
+    if any(len(r) > 128 for r in rls_roles):
+        errors.append("rlsRoles entries must be <= 128 characters")
+
+    # If RLS enabled but no roles, we allow it (Power BI will treat as no role)
+    # but dataset must exist (or be derivable from report)
+
+    cleaned = {
+        "workspaceId": workspace_id,
+        "reportId": report_id,
+        "datasetId": dataset_id or None,
+        "rlsEnabled": rls_enabled,
+        "rlsRoles": rls_roles,
+    }
+    return cleaned, errors
 
 
 def get_fabric_client():
@@ -123,10 +218,11 @@ def get_powerbi_embed_token(user_context=None):
         
         access_token = token_response["access_token"]
         
-        # Get report details from PowerBI API
-        workspace_id = config["PBI_WORKSPACE_ID"]
-        report_id = config["PBI_REPORT_ID"]
-        dataset_id = config.get("PBI_DATASET_ID")
+        # Get report details from PowerBI API (allow per-session overrides)
+        effective = get_effective_embed_settings()
+        workspace_id = effective.get("workspaceId")
+        report_id = effective.get("reportId")
+        dataset_id = effective.get("datasetId")
         
         headers = {
             "Authorization": f"Bearer {access_token}",
@@ -150,8 +246,8 @@ def get_powerbi_embed_token(user_context=None):
         }
         
         # Add RLS identity if enabled - SECURITY: Identity comes from backend session only
-        if config.get("RLS_ENABLED") and user_context:
-            rls_roles = config.get("RLS_ROLES", [])
+        if effective.get("rlsEnabled") and user_context:
+            rls_roles = effective.get("rlsRoles", [])
             
             if not rls_roles:
                 logger.warning("RLS is enabled but no roles are configured. Set RLS_ROLES in environment.")
@@ -213,7 +309,7 @@ def index(*, context):
     """
     Main page with embedded PowerBI report and chat interface.
     """
-    return render_template('index.html', user=context['user'])
+    return render_template('index.html', user=context['user'], embed_settings=get_effective_embed_settings())
 
 
 @app.route("/login")
@@ -248,6 +344,55 @@ def get_embed_info(*, context):
             
     except Exception as e:
         logger.error(f"Error in get_embed_info: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/embedsettings", methods=["GET", "POST"])
+@auth.login_required
+def embed_settings(*, context):
+    """Get or set per-session Power BI embed + RLS settings.
+
+    SECURITY: This endpoint never accepts an RLS username. User identity is always
+    derived from the authenticated Entra ID session when generating the embed token.
+    """
+    if request.method == "GET":
+        return jsonify(get_effective_embed_settings())
+
+    try:
+        payload = request.get_json(silent=True) or request.form.to_dict(flat=True) or {}
+        candidate = {
+            "workspaceId": payload.get("workspaceId"),
+            "reportId": payload.get("reportId"),
+            "datasetId": payload.get("datasetId"),
+            "rlsEnabled": payload.get("rlsEnabled"),
+            "rlsRoles": payload.get("rlsRoles"),
+        }
+
+        # Normalize checkbox / string booleans
+        if isinstance(candidate.get("rlsEnabled"), str):
+            candidate["rlsEnabled"] = candidate["rlsEnabled"].lower() in ("1", "true", "yes", "on")
+
+        cleaned, errors = _validate_embed_settings(candidate)
+        if errors:
+            return jsonify({"error": "Invalid settings", "details": errors}), 400
+
+        session["embed_settings"] = cleaned
+        return jsonify({"message": "Settings saved", "settings": get_effective_embed_settings()})
+
+    except Exception as e:
+        logger.error(f"Error saving embed settings: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/embedsettings/reset", methods=["POST"])
+@auth.login_required
+def reset_embed_settings(*, context):
+    """Clear per-session embed settings so env defaults apply."""
+    try:
+        session.pop("embed_settings", None)
+        return jsonify({"message": "Settings reset", "settings": get_effective_embed_settings()})
+    except Exception as e:
+        logger.error(f"Error resetting embed settings: {e}")
         return jsonify({"error": str(e)}), 500
 
 

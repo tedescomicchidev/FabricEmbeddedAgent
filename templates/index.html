@@ -28,9 +28,51 @@
             <section class="report-section">
                 <div class="section-header">
                     <h2>📊 PowerBI Report</h2>
-                    <button id="refreshReport" class="icon-button" title="Refresh Report">
-                        🔄
-                    </button>
+                    <div class="header-actions">
+                        <button id="toggleSettings" class="icon-button" title="Embed Settings">
+                            ⚙️
+                        </button>
+                        <button id="refreshReport" class="icon-button" title="Refresh Report">
+                            🔄
+                        </button>
+                    </div>
+                </div>
+
+                <div id="embedSettingsPanel" class="embed-settings-panel" style="display:none;">
+                    <form id="embedSettingsForm" class="embed-settings-form">
+                        <div class="settings-grid">
+                            <div class="field">
+                                <label for="workspaceId">Workspace ID</label>
+                                <input id="workspaceId" name="workspaceId" type="text" placeholder="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" value="{{ embed_settings.workspaceId or '' }}" required>
+                            </div>
+                            <div class="field">
+                                <label for="reportId">Report ID</label>
+                                <input id="reportId" name="reportId" type="text" placeholder="11111111-2222-3333-4444-555555555555" value="{{ embed_settings.reportId or '' }}" required>
+                            </div>
+                            <div class="field">
+                                <label for="datasetId">Dataset ID (optional)</label>
+                                <input id="datasetId" name="datasetId" type="text" placeholder="(optional)" value="{{ embed_settings.datasetId or '' }}">
+                            </div>
+                            <div class="field checkbox-field">
+                                <label for="rlsEnabled">Row-Level Security (RLS)</label>
+                                <div class="checkbox-row">
+                                    <input id="rlsEnabled" name="rlsEnabled" type="checkbox" {{ 'checked' if embed_settings.rlsEnabled else '' }}>
+                                    <span class="checkbox-hint">Use signed-in user identity for filtering</span>
+                                </div>
+                            </div>
+                            <div class="field field-wide">
+                                <label for="rlsRoles">RLS Roles (comma-separated)</label>
+                                <input id="rlsRoles" name="rlsRoles" type="text" placeholder="Sales, Finance" value="{{ (embed_settings.rlsRoles | join(', ')) if embed_settings.rlsRoles else '' }}">
+                            </div>
+                        </div>
+
+                        <div class="settings-actions">
+                            <button type="submit" class="primary-button">Apply</button>
+                            <button type="button" id="resetSettings" class="secondary-button" title="Revert to .env defaults">Reset to defaults</button>
+                            <button type="button" id="closeSettings" class="secondary-button">Close</button>
+                            <span id="settingsStatus" class="settings-status"></span>
+                        </div>
+                    </form>
                 </div>
                 <div id="reportContainer" class="report-container">
                     <div class="loading-placeholder">
@@ -82,10 +124,31 @@
         // PowerBI Embedding
         let report = null;
 
+        function setStatus(message, isError = false) {
+            const el = document.getElementById('settingsStatus');
+            if (!el) return;
+            el.textContent = message || '';
+            el.className = `settings-status ${isError ? 'error' : 'ok'}`;
+        }
+
         async function loadReport() {
             const reportContainer = document.getElementById('reportContainer');
             
             try {
+                // Show loading state and fully reset any existing embed
+                reportContainer.innerHTML = `
+                    <div class="loading-placeholder">
+                        <div class="spinner"></div>
+                        <p>Loading report...</p>
+                    </div>
+                `;
+
+                // powerbi-client recommends reset() before re-embedding into the same container
+                if (window.powerbi && typeof window.powerbi.reset === 'function') {
+                    window.powerbi.reset(reportContainer);
+                }
+                report = null;
+
                 // Get embed info from API
                 const response = await fetch('/api/getembedinfo');
                 
@@ -145,6 +208,92 @@
                 </div>
             `;
         }
+
+        // Embed settings UI
+        const toggleSettingsButton = document.getElementById('toggleSettings');
+        const embedSettingsPanel = document.getElementById('embedSettingsPanel');
+        const embedSettingsForm = document.getElementById('embedSettingsForm');
+        const closeSettingsButton = document.getElementById('closeSettings');
+        const resetSettingsButton = document.getElementById('resetSettings');
+
+        function applySettingsToForm(settings) {
+            if (!settings) return;
+            const ws = document.getElementById('workspaceId');
+            const rpt = document.getElementById('reportId');
+            const ds = document.getElementById('datasetId');
+            const rlsEnabled = document.getElementById('rlsEnabled');
+            const roles = document.getElementById('rlsRoles');
+            if (ws) ws.value = settings.workspaceId || '';
+            if (rpt) rpt.value = settings.reportId || '';
+            if (ds) ds.value = settings.datasetId || '';
+            if (rlsEnabled) rlsEnabled.checked = !!settings.rlsEnabled;
+            if (roles) roles.value = (settings.rlsRoles && settings.rlsRoles.length) ? settings.rlsRoles.join(', ') : '';
+        }
+
+        function toggleSettings(forceOpen = null) {
+            const isOpen = embedSettingsPanel.style.display !== 'none';
+            const nextOpen = forceOpen === null ? !isOpen : forceOpen;
+            embedSettingsPanel.style.display = nextOpen ? 'block' : 'none';
+            if (nextOpen) {
+                setStatus('');
+            }
+        }
+
+        toggleSettingsButton?.addEventListener('click', () => toggleSettings());
+        closeSettingsButton?.addEventListener('click', () => toggleSettings(false));
+
+        embedSettingsForm?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            setStatus('Saving…');
+
+            const payload = {
+                workspaceId: document.getElementById('workspaceId')?.value?.trim(),
+                reportId: document.getElementById('reportId')?.value?.trim(),
+                datasetId: document.getElementById('datasetId')?.value?.trim(),
+                rlsEnabled: !!document.getElementById('rlsEnabled')?.checked,
+                rlsRoles: document.getElementById('rlsRoles')?.value
+            };
+
+            try {
+                const resp = await fetch('/api/embedsettings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    const details = (data && data.details && Array.isArray(data.details)) ? data.details.join(' • ') : (data?.error || 'Failed to save settings');
+                    setStatus(details, true);
+                    return;
+                }
+
+                applySettingsToForm(data?.settings);
+
+                setStatus('Saved. Reloading report…');
+                await loadReport();
+                setStatus('Report updated.');
+            } catch (err) {
+                setStatus(err?.message || 'Failed to save settings', true);
+            }
+        });
+
+        resetSettingsButton?.addEventListener('click', async () => {
+            setStatus('Resetting…');
+            try {
+                const resp = await fetch('/api/embedsettings/reset', { method: 'POST' });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    setStatus(data?.error || 'Failed to reset settings', true);
+                    return;
+                }
+                applySettingsToForm(data?.settings);
+                setStatus('Reset. Reloading report…');
+                await loadReport();
+                setStatus('Report updated.');
+            } catch (err) {
+                setStatus(err?.message || 'Failed to reset settings', true);
+            }
+        });
 
         // Chat functionality
         const chatMessages = document.getElementById('chatMessages');
@@ -288,11 +437,8 @@
         clearChatButton.addEventListener('click', clearChat);
 
         document.getElementById('refreshReport').addEventListener('click', () => {
-            if (report) {
-                report.refresh();
-            } else {
-                loadReport();
-            }
+            // Always re-embed so changes to workspace/report/dataset/RLS take effect
+            loadReport();
         });
 
         // Initialize on page load
