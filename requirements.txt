@@ -5,3 +5,4 @@ ms_identity_python[flask] @ git+https://github.com/azure-samples/ms-identity-pyt
 azure-identity
 openai
 msal
+gunicorn
