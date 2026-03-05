@@ -8,4 +8,4 @@ az webapp config appsettings set --resource-group $RESOURCE_GROUP_NAME --name $A
 # RESOURCE_GROUP_NAME='msdocs-python-webapp-quickstart'
 # APP_SERVICE_NAME='msdocs-python-webapp-quickstart-123'
 
-az webapp deploy --name $APP_SERVICE_NAME --resource-group $RESOURCE_GROUP_NAME --src-path app.zip
+az webapp deploy --name $APP_SERVICE_NAME --resource-group $RESOURCE_GROUP_NAME --src-path app.zip --clean

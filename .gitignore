@@ -68,3 +68,4 @@ temp/
 
 # PDF documentation (don't commit)
 *.pdf
+.azure

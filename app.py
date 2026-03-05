@@ -28,8 +28,11 @@ app = Flask(__name__)
 app.secret_key = config["FLASK_SECRET_KEY"]
 app.config["SESSION_TYPE"] = config["SESSION_TYPE"]
 
-# Fabric API scope for token acquisition
+# Fabric API scope for token acquisition (client credentials / service principal)
 FABRIC_SCOPE = ["https://api.fabric.microsoft.com/.default"]
+
+# Fabric API scope for delegated (user) token acquisition
+FABRIC_USER_SCOPE = ["https://api.fabric.microsoft.com/Item.Execute.All"]
 
 # Initialize Entra ID Authentication with Fabric scope
 auth = Auth(
@@ -397,11 +400,12 @@ def reset_embed_settings(*, context):
 
 
 @app.route("/api/chat", methods=["POST"])
-@auth.login_required
+@auth.login_required(scopes=FABRIC_USER_SCOPE)
 def chat(*, context):
     """
     API endpoint for chat with Fabric Data Agent.
     Maintains conversation thread per user session.
+    Uses the authenticated user's delegated token (not the service principal).
     """
     try:
         data = request.json
@@ -423,12 +427,12 @@ def chat(*, context):
                 "error": "Fabric Data Agent is not configured. Please check DATA_AGENT_URL and TENANT_ID settings."
             }), 503
         
-        # Get Fabric API access token
-        access_token = get_fabric_token()
+        # Use the authenticated user's delegated token from Entra ID
+        access_token = context.get("access_token")
         if not access_token:
             return jsonify({
-                "error": "Failed to acquire Fabric API token. Please check your Azure AD app registration has the required Fabric API permissions."
-            }), 503
+                "error": "Failed to acquire user token for Fabric API. The user may need to re-authenticate."
+            }), 401
         
         # Send question to Fabric Data Agent
         response = client.ask(question, access_token=access_token, thread_name=thread_name)
