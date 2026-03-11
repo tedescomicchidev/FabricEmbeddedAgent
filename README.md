@@ -143,6 +143,62 @@ You can also override workspace, report, dataset, and RLS settings per browser s
 
 A ready-to-use dev container configuration is provided in `.devcontainer/devcontainer.json` (Python 3.14). Open the repository in VS Code and select **Reopen in Container** to get a pre-configured development environment.
 
+## Running in GitHub Codespaces
+
+Follow these steps to run the application entirely in a GitHub Codespace:
+
+1. **Browse the GitHub repository** in your browser.
+
+2. Click **"Use this template"** → **"Open in a codespace"** to launch a new Codespace.
+
+3. **Duplicate (or rename) `.env.example` to `.env`:**
+
+   ```bash
+   cp .env.example .env
+   ```
+
+4. **Fill in your values** in `.env` (`CLIENT_ID`, `CLIENT_SECRET`, `TENANT_ID`, etc.). See the environment variables table above for the full list.
+
+5. **Ensure `python.terminal.useEnvFile` is enabled** in VS Code settings so the terminal automatically loads variables from `.env`.
+
+6. **Install dependencies** (ignore any Python environment suggestion popup):
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+7. **Start the Flask app** — but **do not open the browser yet**:
+
+   ```bash
+   python -m flask run
+   ```
+
+8. In Codespaces, open the **PORTS** tab (next to the Terminal panel) and **copy the forwarded URL** (e.g. `https://refactored-sniffle-vpqw9774gxq266r4-5000.app.github.dev/`).
+
+9. **Stop the app** (`Ctrl + C` in the terminal).
+
+10. In `.env`, **replace `REDIRECT_URI`** with the copied URL **plus `/getAToken`**, e.g.:
+
+    ```
+    REDIRECT_URI=https://refactored-sniffle-vpqw9774gxq266r4-5000.app.github.dev/getAToken
+    ```
+
+11. In the **Azure Portal** (Entra ID → App Registration → **Authentication (preview)** → **Web**), **add the redirect URI** from step 10.
+
+12. **Open a new Terminal instance** in Codespaces (this ensures the updated `.env` is loaded correctly).
+
+13. **Run the app again** and open the browser — either through the Codespaces notification or via the URL in the **PORTS** tab:
+
+    ```bash
+    python -m flask run
+    ```
+
+14. **Log in** with your Microsoft account.
+
+15. After a successful login, **remove `:5000` from the redirect URL** in the browser address bar if it appears (known bug — fix pending).
+
+16. **Enjoy!** You now have the embedded Power BI report and Fabric Data Agent chat running in your Codespace.
+
 ## Project Structure
 
 ```
