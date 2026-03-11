@@ -1,0 +1,9 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "pip": true,
+        "/^python3 -c \"import identity\\.flask; import inspect; print\\(inspect\\.getsource\\(identity\\.flask\\.Auth\\)\\)\" 2>&1 \\| head -200$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
