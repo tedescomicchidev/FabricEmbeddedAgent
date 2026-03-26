@@ -497,4 +497,4 @@ if __name__ == "__main__":
         logger.warning("Some features may not work without proper configuration")
     
     # Run the Flask app
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", debug=True)
